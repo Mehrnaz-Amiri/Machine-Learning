@@ -1,0 +1,849 @@
+---
+title: "FinalProject_Airbnb"
+author: "Mehrnaz Amiri"
+output: 
+  html_document:
+    toc: true
+    toc_depth: 2
+---
+
+# 1) Business Understanding: 
+
+## Data Acquisition 
+
+Recently, Airbnb has become the first choice for many travelers, who are looking for the cheaper alternative or traveling in a bigger group. Airbnb is an online marketplace that connects people, who want to rent out their homes with people, who are looking for accommodations in that location. Therefore, it is harmless to say that Airbnb provides a win-win situation for both customers and hosts; while customers can get accommodation at lower prices, hosts can make money by renting their properties1. However, when visitors decide to stay at Airbnb places, they must contact the hosts and go through some approval stages, which is unlike hotels; for instance, if someone is new to Airbnb, there is a chance that he/she does not get approved for certain places and this mostly depends on the host. It is because some of these hosts consider strict policies for customers. Beside host’s policies, there are many other items, which impact customers’ experiences about using Airbnb places and their satisfaction rate. Also, I believe that most of the customers care about price and price plays a significant role in booking a specific Airbnb listing. Therefore, in this project, I want to predict price per night based on related items, satisfaction of customers, and host’s policies based on house rules notes that are written by hosts on Airbnb website.
+The selected dataset shows information about Airbnb listings in Boston. The source of the dataset is on Springboard Blog. The name of this dataset is listing.csv and it has 3903 rows and 106 features, both numeric and categorical variables. 
+Link to source of the data set: http://insideairbnb.com/get-the-data.html. The data behind the Inside Airbnb site is sourced from publicly available information from the Airbnb site.
+With the respect of the main business of Airbnb, I am interested to answer the following questions:
+1) What items have impact on nighty price in Airbnb listings in Boston?
+2) What items impact on customer’s experiences about booking an Airbnb listing?
+3) How can customers find out a specific host has strict or flexible policies based on the notes that are written by hosts on Airbnb website?
+1 https://towardsdatascience.com/boston-airbnb-analysis-f46bcda1713a 
+
+```{r csv}
+# Import Airbnb dataset in R notebook
+Airbnb <- read.csv("~/Desktop/listings.csv", sep = ",", header = TRUE, stringsAsFactors=FALSE)
+# Number of rows and features
+dim(Airbnb)
+# Indicate features whose all values are NA
+colnames(Airbnb)[apply(is.na(Airbnb), 2, all)]
+# Removing variables whose all values are NA
+Airbnb <- Airbnb[,colSums(is.na(Airbnb)) < nrow(Airbnb)]
+# Consider some of the variables, which I think are imprortant. For example, there are some variables such as pictures of Airbnb listings or address of host's homes, which I don't consider in this project. Therefore, I choose 37 columns.
+Airbnb <- Airbnb[,c(11,13,15,24,25,26,30,33,34,37,49,50,51,52,53,54,57,60,61,63,64,65,73,77,79,82,83,84,85,86,87,88,89,95,96)]
+head(Airbnb, n=1)
+# Removing $ and % symboles and convert last_review feature to date class
+library(lubridate)
+Airbnb$last_review <- as.Date(Airbnb$last_review, format = "%Y-%m-%d")
+Airbnb$price <- as.numeric(gsub('[$,]', '', Airbnb$price))
+Airbnb$security_deposit <- as.numeric(gsub('[$,]', '', Airbnb$security_deposit))
+Airbnb$cleaning_fee <- as.numeric(gsub('[$,]', '', Airbnb$cleaning_fee))
+Airbnb$extra_people <- as.numeric(gsub('[$,]', '', Airbnb$extra_people))
+Airbnb$host_response_rate <- as.numeric(gsub('[%,]', '', Airbnb$host_response_rate))
+Airbnb$host_acceptance_rate <- as.numeric(gsub('[%,]', '', Airbnb$host_acceptance_rate))
+```
+
+# 2) Data Understanding:
+
+## Exploratory Data Plots
+
+For this part, I indicate three plots which are; number of Airbnb bookings during time in Boston, price per night for all Airbnb listings, and number of Airbnb listings in each neighborhood in Boston. 
+
+```{r}
+# Plot to represent number of Airbnb bookings during time in Boston
+library(ggplot2)
+Airbnb$year <- year(Airbnb$last_review)
+years.df <- as.data.frame(table(Airbnb$year))
+library(tidyverse) 
+years.plot <- years.df %>%
+  ggplot(aes(x = Var1, y = Freq, group = 1)) + geom_line(color = "blue") + theme_bw() + xlab("Years") + ylab("Number of Airbnb Bookings") + ggtitle("Number of Airbnb booking during time in Boston") + 
+    theme(text = element_text(size=12))
+years.plot
+
+# Plot to represent price per night with its average
+price_den <- ggplot(Airbnb, aes(x = price))
+price_density <- price_den + geom_density() +
+  geom_vline(aes(xintercept = mean(price)), 
+             linetype = "dashed", color = "#FC4E07") +
+  scale_x_continuous("Price", limits = c(0,10000), breaks = c(200, 2000,3000,4000,6000,8000,10000)) + theme_bw() + 
+    theme(text = element_text(size=12)) + ggtitle("Price per night for all Airbnb listings")
+price_density
+
+# Plot to represent number of Airbnb listings in each neighborhood in Boston
+Airbnb.nb <- within(Airbnb, 
+                   neighbourhood_cleansed <- factor(neighbourhood_cleansed, 
+                                    levels=names(sort(table(neighbourhood_cleansed)))))
+g1 <- ggplot(Airbnb.nb) + geom_bar(aes(x = neighbourhood_cleansed), fill = "navy", width = 0.5) + theme_bw() +
+  theme(axis.text.x = element_text(angle=90, vjust=0.6)) + ggtitle("Number of Airbnb Listings in each Neighbourhoods") + xlab("Neighborhoods")
+g1 + coord_flip()
+```
+
+## Detection of outliers
+
+In order to find outliers, I consider z-score value for all numeric features. If an observation in a feature has z-score higher than abs 3, I consider it as an outlier value and remove it from data.
+
+```{r}
+# Remove values which have z-score greater than 3 as outliers
+m.host_listings_count <- mean(Airbnb$host_listings_count)
+s.host_listings_count <- sd(Airbnb$host_listings_count)
+z.host_listings_count <- abs(m.host_listings_count - Airbnb$host_listings_count)/s.host_listings_count
+outlier.host_listings_count <- Airbnb$host_listings_count[which(z.host_listings_count > 3)]
+outlier.host_listings_count
+Airbnb <- Airbnb[-which(Airbnb$host_listings_count %in% outlier.host_listings_count),]
+
+m.price <- mean(Airbnb$price)
+s.price <- sd(Airbnb$price)
+z.price <- abs(m.price - Airbnb$price)/s.price
+outlier.price <- Airbnb$price[which(z.price > 3)]
+outlier.price
+Airbnb <- Airbnb[-which(Airbnb$price %in% outlier.price),]
+
+m.security_deposit <- mean(Airbnb$security_deposit)
+s.security_deposit <- sd(Airbnb$security_deposit)
+z.security_deposit <- abs(m.security_deposit - Airbnb$security_deposit)/s.security_deposit
+outlier.security_deposit <- Airbnb$security_deposit[which(z.security_deposit > 3)]
+outlier.security_deposit
+
+m.cleaning_fee <- mean(Airbnb$cleaning_fee)
+s.cleaning_fee <- sd(Airbnb$cleaning_fee)
+z.cleaning_fee <- abs(m.cleaning_fee - Airbnb$cleaning_fee)/s.cleaning_fee
+outlier.cleaning_fee<- Airbnb$cleaning_fee[which(z.cleaning_fee > 3)]
+outlier.cleaning_fee 
+
+m.extra_people <- mean(Airbnb$extra_people,na.rm = TRUE)
+s.extra_people <- sd(Airbnb$extra_people,na.rm = TRUE)
+z.extra_people <- abs(m.extra_people - Airbnb$extra_people)/s.extra_people
+outlier.extra_people <- Airbnb$extra_people[which(z.extra_people > 3)]
+outlier.extra_people
+Airbnb <- Airbnb[-which(Airbnb$extra_people %in% outlier.extra_people),]
+
+m.minimum_nights <- mean(Airbnb$minimum_nights,na.rm = TRUE)
+s.minimum_nights <- sd(Airbnb$minimum_nights,na.rm = TRUE)
+z.minimum_nights <- abs(m.minimum_nights - Airbnb$minimum_nights)/s.minimum_nights
+outlier.minimum_nights <- Airbnb$minimum_nights[which(z.minimum_nights > 3)]
+outlier.minimum_nights
+Airbnb <- Airbnb[-which(Airbnb$minimum_nights %in% outlier.minimum_nights),]
+
+m.maximum_nights <- mean(Airbnb$maximum_nights,na.rm = TRUE)
+s.maximum_nights <- sd(Airbnb$maximum_nights,na.rm = TRUE)
+z.maximum_nights <- abs(m.maximum_nights - Airbnb$maximum_nights)/s.maximum_nights
+outlier.maximum_nights <- Airbnb$maximum_nights[which(z.maximum_nights > 3)]
+outlier.maximum_nights
+Airbnb <- Airbnb[-which(Airbnb$maximum_nights %in% outlier.maximum_nights),]
+
+# I don't remove outliers for some specific features, because it doesn't make sense. For example, host_response_rate is based on percentage, so all its values are acceptable, or number of bedrooms, bathrooms, accomodates, number of reviews, and score for different types of reviews.
+```
+
+## Correlation analysis
+
+To represent correlation between features I use pairs panels plot.
+
+```{r}
+# Considering correlation between some numeric features
+library(psych)
+pairs.panels(Airbnb[c("price", "accommodates", "host_response_rate", "host_acceptance_rate","bedrooms", "availability_365" ,"minimum_nights", "number_of_reviews", 'bathrooms', 'security_deposit', 'cleaning_fee','extra_people', 'review_scores_rating')])
+# Price per night has approximately high correlation with accommodates and cleaning fee, but it is not too strong. So, I can use all these features in my models.
+```
+
+# 3) Data Preparation:
+
+## Data imputation
+
+First, I find missing values in each column. Then, I use mean to impute NA values for numeric features. Because, only numeric features have NA values in the dataset.
+
+```{r}
+# Removing year feature, which I don't need it
+Airbnb <- Airbnb[,-36]
+# Variables whose have NA values
+colnames(Airbnb)[apply(is.na(Airbnb), 2, any)]
+# Impute NA values with mean for numeric features 
+Airbnb$bathrooms[which(is.na(Airbnb$bathrooms))] <- mean(Airbnb$bathrooms,na.rm=TRUE)
+Airbnb$bedrooms[which(is.na(Airbnb$bedrooms))] <- mean(Airbnb$bedrooms,na.rm=TRUE)
+Airbnb$beds[which(is.na(Airbnb$beds))] <- mean(Airbnb$beds,na.rm=TRUE)
+Airbnb$review_scores_rating[which(is.na(Airbnb$review_scores_rating))] <- mean(Airbnb$review_scores_rating,na.rm=TRUE)
+Airbnb$review_scores_accuracy[which(is.na(Airbnb$review_scores_accuracy))] <- mean(Airbnb$review_scores_accuracy,na.rm=TRUE)
+Airbnb$review_scores_cleanliness[which(is.na(Airbnb$review_scores_cleanliness))] <- mean(Airbnb$review_scores_cleanliness,na.rm=TRUE)
+Airbnb$review_scores_checkin[which(is.na(Airbnb$review_scores_checkin))] <- mean(Airbnb$review_scores_checkin,na.rm=TRUE)
+Airbnb$review_scores_communication[which(is.na(Airbnb$review_scores_communication))] <- mean(Airbnb$review_scores_communication,na.rm=TRUE)
+Airbnb$review_scores_location[which(is.na(Airbnb$review_scores_location))] <- mean(Airbnb$review_scores_location,na.rm=TRUE)
+Airbnb$review_scores_value[which(is.na(Airbnb$review_scores_value))] <- mean(Airbnb$review_scores_value,na.rm=TRUE)
+Airbnb$host_response_rate[which(is.na(Airbnb$host_response_rate))] <- mean(Airbnb$host_response_rate,na.rm=TRUE)
+Airbnb$security_deposit[which(is.na(Airbnb$security_deposit))] <- mean(Airbnb$security_deposit,na.rm=TRUE)
+Airbnb$host_acceptance_rate[which(is.na(Airbnb$host_acceptance_rate))] <- mean(Airbnb$host_acceptance_rate,na.rm=TRUE)
+Airbnb$cleaning_fee[which(is.na(Airbnb$cleaning_fee))] <- mean(Airbnb$cleaning_fee,na.rm=TRUE)
+# Checking for NA values in dataset
+colnames(Airbnb)[apply(is.na(Airbnb), 2, any)]
+# This column contains Date so I don't impute values with mode 
+```
+
+## Checking distribution of features and apply transform methods to remove skewness
+
+Based on distribution of features, I transform price variable to log(price) to solve its skewness.
+
+```{r}
+# Skew for features
+Airbnb_n <- Airbnb[,c(4,5,7,12,13,14,15,17,18,19,20,21,22,24,25,27)]
+par(mfrow = c(2,4))
+for (i in 1:ncol(Airbnb_n)) {
+hist(Airbnb_n[,i], main = colnames(Airbnb_n)[i], xlab = colnames(Airbnb_n)[i])}
+# Price is only feature that we can solve its skewness with log transformation
+hist(Airbnb$price)
+hist(log(Airbnb$price))
+Airbnb$price <- log(Airbnb$price)
+summary(Airbnb$price)
+# Because it has Inf values, we should remove them from dataset 
+Airbnb <- Airbnb[-c(1362,3383,3711),]
+```
+
+## Feature engineering: new derived features
+
+I create three new variables, which are season, satisfaction, and point. I would like to check what season is the most popular for visitors who come to Boston. In this part, the date of last review is used to help me figure out which season has the most visitors in Boston. The highest number of last reviews are written in Winter and if we consider these dates as the date visitors book the listings (which is not a bad assumption), Boston has the most visitors in Winter! Satisfaction variable is defined based on the score for all reviews, which are equal or greater than 9 out of 10, since the average of all reviews is greater than 9. Point variable, which shows hosts' policies (strictness/flexibility) based on house rules that are written by hosts on Airbnb website is defined based on the below metrics:
+a) If the host requests customers to provide profile pictures, score 1 is given; if not, score 0 is given.
+b) If the host is strict about cancellation by guests within 60 days or 30 days of reservation, score 1 is given; if not, score 0 is given. 
+c) If security deposit is equal to $1000, score 1 is given; otherwise score 0 is given.
+d) If Acceptance rate by hosts is less than 80% score 1 is given; otherwise score 0 is given
+e) If the notes that are written by hosts contain specific words, which indicate strictness of host’s policies, score 1 is given; otherwise score 0 is given.
+
+```{r}
+library(lubridate)
+## Create new variable season based on last review date
+Airbnb$season <- rep(NA , nrow(Airbnb))
+Airbnb[!is.na(Airbnb$last_review) &   ((month(ymd(Airbnb$last_review)) == 03 & day(ymd(Airbnb$last_review)) >= 21) |
+                                       month(ymd(Airbnb$last_review)) == 04 |
+                                       month(ymd(Airbnb$last_review)) == 05 |
+                                       (month(ymd(Airbnb$last_review)) == 06 & day(ymd(Airbnb$last_review)) < 21)), 36] <- 'Spring'
+
+
+Airbnb[!is.na(Airbnb$last_review) & ((month(ymd(Airbnb$last_review)) == 06 & day(ymd(Airbnb$last_review)) >= 21) |
+                                       month(ymd(Airbnb$last_review)) == 07 |
+                                       month(ymd(Airbnb$last_review)) == 08 |
+                                       (month(ymd(Airbnb$last_review)) == 09 & day(ymd(Airbnb$last_review)) < 21)), 36] <- 'Summer'
+
+Airbnb[!is.na(Airbnb$last_review) & ((month(ymd(Airbnb$last_review)) == 09 & day(ymd(Airbnb$last_review)) >= 21) |
+                                       month(ymd(Airbnb$last_review)) == 10 |
+                                       month(ymd(Airbnb$last_review)) == 11 |
+                                       (month(ymd(Airbnb$last_review)) == 12 & day(ymd(Airbnb$last_review)) < 21)), 36] <- 'Fall'
+
+Airbnb[!is.na(Airbnb$last_review) & ((month(ymd(Airbnb$last_review)) == 12 & day(ymd(Airbnb$last_review)) >= 21) |
+                                       month(ymd(Airbnb$last_review)) == 01 |
+                                       month(ymd(Airbnb$last_review)) == 02 |
+                                       (month(ymd(Airbnb$last_review)) == 03 & day(ymd(Airbnb$last_review)) < 21)), 36] <- 'Winter'
+
+table(Airbnb$season, useNA = "ifany")
+
+# Imputing columns whose values are NA with mode
+Mode <- function(x){
+  ux <- unique(x) 
+  ux[which.max(tabulate(match(x,ux)))]
+}
+Airbnb$season[which(is.na(Airbnb$season))] <- Mode(Airbnb$season)
+# Cheking for NA values in season feature
+table(Airbnb$season, useNA = "ifany")
+
+
+## Create new variable, which is satisfaction of customers based on score of reviews
+Airbnb$satisfaction <- ifelse(Airbnb$review_scores_rating >= 90 & Airbnb$review_scores_cleanliness >= 9 & Airbnb$review_scores_accuracy >= 9 & Airbnb$review_scores_location >= 9  & Airbnb$review_scores_checkin >= 9 & Airbnb$review_scores_communication >= 9 & Airbnb$review_scores_value >= 9 , "Satisfaction", "Not Satisfaction")
+table(Airbnb$satisfaction, useNA = "ifany")
+Airbnb$satisfaction <- ifelse(Airbnb$satisfaction == "Satisfaction",1,0)
+
+
+## Creating host's policies (point) variable
+# Creating dummy variables from categorical variable
+Airbnb$require_guest_profile_picture <- ifelse(Airbnb$require_guest_profile_picture == "t",1,0)
+host_variables <- dplyr::select(Airbnb, host_acceptance_rate, security_deposit, require_guest_profile_picture, cancellation_policy, house_rules)
+host_variables$cancellation_policy <- ifelse(host_variables$cancellation_policy == "super_strict_60" | host_variables$cancellation_policy == "super_strict_30", 1, 0)
+host_variables$require_guest_profile_picture <- ifelse(host_variables$require_guest_profile_picture == "t",1,0)
+host_variables$host_acceptance_rate <-  ifelse(host_variables$host_acceptance_rate <= 80, 1, 0)
+host_variables$security_deposit <- ifelse(host_variables$security_deposit == 1000, 1, 0)
+# Finding information that is provided by strict hosts
+library(stringr)
+host_variables$strict_info <- ifelse(as.numeric(str_detect(host_variables$house_rules,"No shoes")) | as.numeric(str_detect(host_variables$house_rules,"no shoes")) |  as.numeric(str_detect(host_variables$house_rules,"No smoking")) |  as.numeric(str_detect(host_variables$house_rules,"no smoking")) | as.numeric(str_detect(host_variables$house_rules, "no party")) | 
+as.numeric(str_detect(host_variables$house_rules, "NO SMOKING")) |          as.numeric(str_detect(host_variables$house_rules,"no parties")), 1, 0)
+# Identifying points for each host in Airbnb dataset
+Airbnb$point <- apply(host_variables[,c(1,2,3,4,6)], 1, sum, na.rm = TRUE)
+Airbnb$point <- ifelse(Airbnb$point == 0, 0, 1)
+table(Airbnb$point)
+```
+
+Correlation between price and new derived varaibles:
+
+```{r}
+# Correlation between the created variables and price
+Airbnb_Mat <- dplyr::select(Airbnb, satisfaction, point, price)
+corMat <- cor(Airbnb_Mat)
+corMat
+# Price doesn't have high correlation with created variables, so I can use these variables in regression models
+```
+
+## Normalization/standardization of feature values
+
+I use normalization method to normalize numeric features in data. It helps me to have all features in the same scale (minimum value of each feature is 0 and maximum value is 1), So, I can interpret the results of models much easier. Specially, because I use multiple regression and knn regression models to predict price per night.
+
+## Feature engineering: dummy codes
+
+I use fastDummies library (dummy_cols function) to make dummy codes. I'm removing the first dummy to avoid overfitting.
+
+```{r}
+# Creating dummy variables from categorical variable
+Airbnb$host_is_superhost <- ifelse(Airbnb$host_is_superhost == "t", 1, 0)
+Airbnb$host_has_profile_pic <- ifelse(Airbnb$host_has_profile_pic == "t", 1, 0)
+# Selecting numeric features
+Airbnb_n <- dplyr::select(Airbnb, accommodates, beds, host_response_rate, host_acceptance_rate, price,bathrooms, bedrooms, availability_365, minimum_nights, maximum_nights, review_scores_rating, number_of_reviews, review_scores_rating, host_is_superhost,host_has_profile_pic,satisfaction, point,host_listings_count,neighbourhood_cleansed, room_type, bed_type, season)
+
+library(fastDummies)
+set.seed(123)
+# Using dummy_cols to make dummies
+Airbnb_n <- dummy_cols(Airbnb_n, select_columns = c("neighbourhood_cleansed","room_type","bed_type","season"), remove_first_dummy = TRUE)
+# Removing categorical varaibles, which are converted to dummy codes
+Airbnb_n <- Airbnb_n[,-c(18,19,20,21)]
+
+# Normalization
+normalize <- function(x){
+  (x-min(x))/(max(x)-min(x))
+}
+Airbnb_n <- as.data.frame(lapply(Airbnb_n, normalize)) 
+# Checking for normalization
+summary(Airbnb$price)
+summary(Airbnb_n$price)
+```
+
+## Creating of training & testing subsets 
+
+I divide the dataset into 75% for training and 25% for testing datasets. I split data into train-test in order to avoid overfitting. I will use training data in models and testing data to predict results. I chose these numbers to split data into training and testing datasets, because with less number of training data, my parameter estimates have greater variance. With less testing data, my performance statistic will have greater variance. Therefore, I think these numbers are good to create training and testing datasets.
+Also, I will use k-fold cross-validation (10-fold cross-validation) on the training dataset when training stacked ensemble model with using predicted results of linear regression and knn.reg models.
+
+```{r}
+# Split dataset to 75% for training and 25% for testing datasets
+set.seed(12345)
+Airbnb_rows <- sample.int(n = nrow(Airbnb_n), size = floor(.75*nrow(Airbnb_n)))
+Airbnb.train <- Airbnb_n[Airbnb_rows,]
+Airbnb.test <- Airbnb_n[-Airbnb_rows,]
+# Checking for training and testin datasets
+nrow(Airbnb_n)
+nrow(Airbnb.train)
+nrow(Airbnb.test)
+```
+
+## Feature engineering: PCA
+
+PCA is used to identify the components with the maximum variance, and the contribution of each variable to a component is based on its magnitude of variance. Additionally, I use PCA analysis to reduce the dimensionality of features that are correlated with each other, either heavily or lightly.
+
+```{r}
+# Feature engineering: PCA
+set.seed(12345)
+Airbnb.PCA <- prcomp(Airbnb.train)
+summary(Airbnb.PCA)
+plot(summary(Airbnb.PCA)$importance[3,],xlab="PCA",ylab="Variance")
+# Create a train and test PCA dataset, use the first 40 principal components based on the plot. Because, when there are 40 PCA, we will have 90-95 percent of variance in the data 
+Airbnb.PCA.train <- as.data.frame(cbind(Airbnb.PCA$x[,1:40], price=Airbnb.train$price)) 
+Airbnb.PCA.test <- as.data.frame(cbind(predict(Airbnb.PCA, Airbnb.test)[,1:40], price=Airbnb.test$price))
+```
+
+# 4) Modeling and 5) Evaluation:
+
+## Construction of three relation models
+
+## Model1 - price - Multiple linear regression model
+
+I consider multiple linear regression model to predict price per night for Airbnb listings. Because, price is a continuous feature and most of the variables, which I want to use to predict price are numeric and some variables are categorical, and I convert them to dummy codes. Therefore, multiple linear regression is selected to predict nighty price.
+
+## Evaluation of fit of models with holdout method
+
+To evalute model I used testing data in order to avoid overfitting.
+
+```{r}
+# Using all variables to predict price per night
+reg_model_1 <- lm(price ~ ., data = Airbnb.train)
+summary(reg_model_1)
+# Using backward elimination method to select features, which have significant impact on price (It means their p-values are less than 0.05)
+reg_model_2 <- lm(price~host_is_superhost+accommodates+bathrooms+bedrooms+availability_365+neighbourhood_cleansed_Back.Bay+neighbourhood_cleansed_Bay.Village+neighbourhood_cleansed_Beacon.Hill+neighbourhood_cleansed_Brighton+neighbourhood_cleansed_Charlestown+neighbourhood_cleansed_Chinatown+neighbourhood_cleansed_Dorchester+neighbourhood_cleansed_Downtown+neighbourhood_cleansed_East.Boston+neighbourhood_cleansed_Fenway+neighbourhood_cleansed_Hyde.Park+neighbourhood_cleansed_Jamaica.Plain+neighbourhood_cleansed_Leather.District+neighbourhood_cleansed_Longwood.Medical.Area+neighbourhood_cleansed_Mattapan+neighbourhood_cleansed_Mission.Hill+neighbourhood_cleansed_North.End+neighbourhood_cleansed_Roslindale+neighbourhood_cleansed_Roxbury+neighbourhood_cleansed_South.Boston+neighbourhood_cleansed_South.Boston.Waterfront+neighbourhood_cleansed_South.End+neighbourhood_cleansed_West.End+neighbourhood_cleansed_West.Roxbury+number_of_reviews+satisfaction, data=Airbnb.train)
+library(stargazer)
+stargazer(reg_model_2, header = FALSE, type = "text", 
+          single.row = TRUE, dep.var.labels = c("Price"))
+# R-squared is about 0.60. It means that 60% of variance in price is predicted by regression model. 
+
+# Evaluation of fit of models with holdout method
+pred <- predict(reg_model_2, Airbnb.test, type = 'response')
+# Correlation between actual values and predicted values is about 0.77, which indicates good correlation
+cor(pred, Airbnb.test$price)
+# Indicating correlation between actual and predicted values
+plot(pred, Airbnb.test$price)
+abline(a = 0, b = 1, col = "red", lwd = 3, lty = 2)
+# RMSE for multiple linear regression
+RMSE.reg <- sqrt(mean((Airbnb.test$price - pred)^2))
+RMSE.reg
+```
+
+## (PCA Analysis) 
+
+## Model1 (PCA Analysis)
+
+## Linear regression for predicting nighty price
+
+## Evaluation of fit of models with holdout method
+
+```{r}
+# PCA analysis for regression model
+reg_model_PCA <- lm(price ~ ., data = Airbnb.PCA.train)
+summary(reg_model_PCA)
+# R squared is about 0.96, which is much better than previous regression model
+
+# Evaluation of fit of models with holdout method
+pred.PCA <- predict(reg_model_PCA, Airbnb.PCA.test, type = 'response')
+# Correlation between actual values and predicted values is about 0.98, which indicates great correlation and much better than previous model
+cor(pred.PCA, Airbnb.PCA.test$price)
+plot(pred.PCA, Airbnb.PCA.test$price)
+abline(a = 0, b = 1, col = "blue", lwd = 3, lty = 2)
+# RMSE for PCA analysis for multiple linear regression
+RMSE.reg.PCA <- sqrt(mean((Airbnb.PCA.test$price - pred.PCA)^2))
+RMSE.reg.PCA
+# RMSE is smaller number compare to previous model. Therefore, model with PCA analysis is a better model
+```
+
+## Model2 - price - KNN.reg model
+
+The other model that I want to use to predict price per night is knn regression model, which is useful for numeric variables. Therefore, I believe that knn regression is a good model to compare its results with multiple linear regression model.
+
+## Evaluation of fit of models with holdout method 
+
+To evalute model I used testing dataset.
+
+## Tuning of models
+
+Parameter K in knn model is a tuning parameter.
+
+```{r}
+library(caret)
+# k = sqrt(number of rows for data)
+k <- sqrt(nrow(Airbnb.train))
+# Fit knnreg to the training dataset
+# Tuning of models
+knn.model <- knnreg(Airbnb.train[,-5], Airbnb.train$price, k=k)
+
+# Evaluation of fit of models with holdout method 
+# Predicted regression prices for the testing dataset
+pred.knn <- predict(knn.model, Airbnb.test[,-5])
+# Correlation between actual values and predicted values is about 0.70, which indicates not strong correlation and it is smaller number compare to value of correlation between actual and predicted values in multiple regression model.
+cor(pred.knn, Airbnb.test$price)
+plot(pred.knn, Airbnb.test$price)
+abline(a = 0, b = 1, col = "red", lwd = 3, lty = 2)
+# Compute the RMSE for knn.reg model
+RMSE.knn <- sqrt(mean((Airbnb.test$price - pred.knn)^2))
+RMSE.knn
+# 0.086, is greater number compare to RMSE of multiple regression
+```
+
+## Model2 (PCA Analysis) 
+
+## KNN.reg model to predict nighty price
+
+## Evaluation of fit of models with holdout method 
+
+## Tuning of models
+
+Parameter K in knn model with PCA analysis is a tuning parameter.
+
+```{r}
+# PCA analysis for KNNreg model
+# Tuning of models
+k.PCA <- sqrt(nrow(Airbnb.PCA.train))
+knn.PCA <- knnreg(Airbnb.PCA.train[,-41], Airbnb.PCA.train$price, k=k.PCA)
+
+# Evaluation of fit of models with holdout method 
+pred.knn.PCA <- predict(knn.PCA, Airbnb.PCA.test[,-41])
+# Correlation between actual values and predicted values is about 0.74, which is bigger number compare to knn.reg model
+cor(pred.knn.PCA, Airbnb.PCA.test$price)
+plot(pred.knn.PCA, Airbnb.PCA.test$price)
+abline(a = 0, b = 1, col = "blue", lwd = 3, lty = 2)
+RMSE.PCA.knn <- sqrt(mean((Airbnb.PCA.test$price-pred.knn.PCA)^2))
+RMSE.PCA.knn
+# RMSE with PCA analysis in knn.reg model is about 0.083, which is smaller than knn.reg model.Therefore PCA analysis model for KNN regression is better model compare to knn.reg model.
+```
+
+## Model 3 - Stacked Ensemble model-price
+
+I construct stacked ensemble model based on predictions of multiple linear regression model and knn regression model.
+
+## Evaluation of fit of models with holdout method 
+
+I evaluate stacked ensemble model with testing dataset, which is constructed based on linear regression and knn regression models' predictions.
+
+## Evaluation with k-fold cross-validation
+
+I used k-fold cross validation in ensemble model, which is used for estimating model performance. Rather than taking repeated random samples that could potentially use the same record more than once, k-fold cv randomly divides the data into k random partitions called folds.
+
+## Tuning of models
+
+I set up the tuning grid for the random forest model. The tuning parameter for this model is mtry, which defines how many features are randomly selected at each split.
+
+```{r}
+## Stacked ensemble model
+# Create a dataframe for training with the predictions from multiple regression and KNN.reg models
+p.reg <- predict(reg_model_2, Airbnb.train)
+p.knn <- predict(knn.model, Airbnb.train[,-5])
+ensemble.train <- data.frame(p.reg=p.reg, p.knn=p.knn, price=Airbnb.train$price)
+
+# Create a dataframe for tetsing with the predictions from multiple regression and KNNreg models
+p.reg <- predict(reg_model_2, Airbnb.test)
+p.knn <- predict(knn.model, Airbnb.test[,-5])
+ensemble.test <- data.frame(p.reg=p.reg, p.knn=p.knn, price=Airbnb.test$price)
+# Stacked Ensemble model
+# Evaluation of fit of models with holdout method 
+# Evaluation with k-fold cross-validation
+# Tuning of models
+set.seed(123)
+tunegrid <- expand.grid(mtry = 1)
+# When I just consider mtry=1, the performance of rf model is boosted, since the RMSE is decreased and the correlation between actual values and predicted values is increased.
+ctrl <- trainControl(method = "cv", number = 10)
+ensemble.price <- train(price ~ ., data = ensemble.train, method = 'rf',
+        trControl = ctrl, tuneGrid = tunegrid)
+ensemble.price
+pred.ensemble <- predict(ensemble.price , ensemble.test)
+cor(pred.ensemble, ensemble.test$price)
+plot(pred.ensemble, ensemble.test$price)
+abline(a = 0, b = 1, col = "red", lwd = 3, lty = 2)
+# Correlation between actual values and predicted values is about 0.80 in ensemble model, which is grester number compare to knn.reg model and multiple regression model
+RMSE.ensemble <- 0.08756843 
+# RMSE for ensemble model is about 0.089, which is smaller number compare to knn.reg model and multiple regression model
+```
+
+## Model3- Stacked Ensemble Model (PCA Analysis)
+
+I construct stacked ensemble model based on predictions of multiple linear regression model and knn regression model, with the PCA data.
+
+## Evaluation of fit of models with holdout method 
+
+I evaluate stacked ensemble model with testing dataset, which is constructed based on linear regression and knn regression models' predictions with PCA analysis.
+
+## Evaluation with k-fold cross-validation
+
+I used k-fold cross validation in ensemble model with PCA analysis.
+
+```{r}
+## PCA for stacked ensemble price model
+# Create a dataframe for training with the predictions from PCA analysis of multiple regression and KNNreg models
+p.reg.PCA <- predict(reg_model_PCA, Airbnb.PCA.train)
+p.knn.PCA <- predict(knn.PCA, Airbnb.PCA.train[,-41])
+ensemble.train.PCA <- data.frame(p.reg.PCA=p.reg.PCA, p.knn.PCA=p.knn.PCA, price=Airbnb.PCA.train$price)
+
+# Create a dataframe for tetsing with the predictions from PCA analysis of multiple regression and KNNreg models
+p.reg.PCA <- predict(reg_model_PCA, Airbnb.PCA.test)
+p.knn.PCA <- predict(knn.PCA, Airbnb.PCA.test[,-5])
+ensemble.test.PCA <- data.frame(p.reg.PCA=p.reg.PCA, p.knn.PCA=p.knn.PCA, price=Airbnb.PCA.test$price)
+
+# Evaluation of fit of models with holdout method 
+# Evaluation with k-fold cross-validation
+# Tuning of models
+set.seed(123)
+ctrl <- trainControl(method = "cv", number = 10)
+ensemble.price.PCA <- train(price ~ ., data = ensemble.train.PCA, method = 'rf',trControl = ctrl)
+ensemble.price.PCA
+pred.ensemble.PCA <- predict(ensemble.price.PCA , ensemble.test.PCA)
+cor(pred.ensemble.PCA, ensemble.test.PCA$price)
+# Correlation between actual values and predicted values is about 0.98 in PCA analysis of ensemble model, which is grester number compare to previous ensemble model
+plot(pred.ensemble.PCA, ensemble.test.PCA$price)
+abline(a = 0, b = 1, col = "blue", lwd = 3, lty = 2)
+RMSE.ensemble.PCA <- 0.02215818
+# RMSE with PCA analysis in knn.reg model is about 0.022, which is smaller than all previous models.
+```
+
+## Comparison of models
+
+## Based on RMSE
+
+I compare three models based on RMSE.
+
+## Comparison of PCA models vs non PCA models
+
+I compare three models and all models with PCA analysis with RMSE.
+
+```{r}
+## Comparison of models
+# Comparison of PCA models vs non PCA models
+models.price <- data.frame(Regression = RMSE.reg, KNN = RMSE.knn, Ensemble = RMSE.ensemble)
+models.PCA.price <- data.frame(Regression = RMSE.reg.PCA, KNN = RMSE.PCA.knn, Ensemble = RMSE.ensemble.PCA)
+RMSE <- rbind(models.price, models.PCA.price)
+rownames(RMSE) <- c("Models","PCA Models")
+RMSE
+```
+
+Based on the below table, all PCA analysis models have smaller RMSE compare to their models. It means that models with PCA analysis are better models. In general, stacked ensemble model is much better model compare to regression and knn.reg models and if we consider PCA analysis of stacked ensemble model, we will have the best model among all models to predict price per night.
+
+
+## Model1 - Satisfaction - Logistic regression model
+
+Because, satisfaction variable is a binary feature, I use logistic regression model to predict it.
+
+```{r}
+# Split dataset to 75% training and 25% testing
+set.seed(12345)
+Airbnb_rows <- sample.int(n = nrow(Airbnb), size = floor(.75*nrow(Airbnb)))
+Airbnb.train <- Airbnb[Airbnb_rows,]
+Airbnb.test <- Airbnb[-Airbnb_rows,]
+# Checking for training and testing datasets
+nrow(Airbnb)
+nrow(Airbnb.train)
+nrow(Airbnb.test)
+
+# Glm Model for Satisfaction Variable
+log_glm_1 <- glm(satisfaction ~ number_of_reviews + accommodates + point + price + cleaning_fee + minimum_nights + host_response_rate + cancellation_policy + security_deposit, data = Airbnb.train, family = 'binomial')
+summary(log_glm_1)
+# Considering features which have significant p-values
+log_glm_2 <- glm(satisfaction ~ number_of_reviews + accommodates + price + cleaning_fee + minimum_nights + host_response_rate, data = Airbnb.train, family = 'binomial')
+# Display regression using stargazer
+stargazer(log_glm_2, header = FALSE, type = "text", 
+          single.row = TRUE, dep.var.labels = c("Satisfaction"))
+```
+
+## Evaluation of fit of models with holdout method
+
+```{r}
+# Evaluation of fit of models with holdout method
+log_predict <- predict(log_glm_2, Airbnb.test, type = "response") 
+library(pROC)
+log_predict <- ifelse(log_predict > 0.5, 1, 0)
+# AUC
+auc <- roc(Airbnb.test$satisfaction, log_predict)
+print(auc$auc)
+
+# Accuracy of model based on confusion matrix is about 0.78
+library(caret)
+confusionMatrix(factor(log_predict, levels = c(1,0)),
+factor(Airbnb.test$satisfaction, levels = c(1,0)))
+
+# Calculating precision, recall, and F score
+log_predictions <- predict(log_glm_2, Airbnb.test)
+preds.log <- sum(log_predictions)
+precision <- sum(log_predictions & Airbnb.test$satisfaction)/preds.log
+recall <- sum(log_predictions & Airbnb.test$satisfaction)/sum(Airbnb.test$satisfaction)
+f <- 2 * precision * recall/(precision + recall)
+F.pre.rec.log <- data.frame(precision, recall, f) 
+F.pre.rec.log
+```
+
+## Model2 - satisfaction - SVM models
+
+I use SVM model with two different kernels to predict satisfaction variable. Because, satisfaction is a binary categorical feature.
+
+## SVM with radial basis kernel
+
+To choose kenrel a bit of trial and error is required by training and evaluating several SVMs on a dataset. In many cases, the choice of kernel is arbitrary, as the performance may vary only slightly. So, I choose two different kernels. It is recommended to start with Radial Basis kernel.
+
+## SVM with linear kernel
+
+## Evaluation of fit of models with holdout method 
+
+## Tuning of models
+
+Parameter cost (C) in SVM models is a tuning parameter.
+
+```{r}
+# Creating categorical feature for dummy variable
+Airbnb.train$satisfaction <- ifelse(Airbnb.train$satisfaction == 1, "Satisfaction", "Not Satisfaction")
+Airbnb.test$satisfaction <- ifelse(Airbnb.test$satisfaction == 1, "Satisfaction", "Not Satisfaction")
+library(kernlab)
+# We need to normalize or standardize the data. However, we can skip this step, because the kernlab package that we use for the SVM model will perform the rescaling automatically.
+# Radial Basis kernel "Gaussian" with considering costs values
+costs <- c(1, seq(from = 5, to = 30, by = 5)) 
+set.seed(12345)
+svm.rb <- ksvm(satisfaction ~ number_of_reviews + accommodates + price + cleaning_fee + minimum_nights + host_response_rate, data = Airbnb.train, kernel = "rbfdot", C = costs, scaled = TRUE) 
+pred.svm.rb <- predict(svm.rb, Airbnb.test)
+acc <- ifelse(pred.svm.rb == Airbnb.test$satisfaction, 1, 0) 
+accuracy_values <- sum(acc)/nrow(Airbnb.test)
+accuracy_values
+# Accuracy for svm model with rb kernel is about 0.78, which is equal to logistic regression
+
+# Linear kernel with the same costs values
+costs <- c(1, seq(from = 5, to = 30, by = 5)) 
+Airbnb_svm <- ksvm(satisfaction ~ number_of_reviews + accommodates + price + cleaning_fee + minimum_nights + host_response_rate, data = Airbnb.train, kernel = "vanilladot", scaled = TRUE, C = costs)
+sat.pred <- predict(Airbnb_svm, Airbnb.test) 
+acc <- sat.pred == Airbnb.test$satisfaction 
+table(acc)
+prop.table(table(acc))
+# Accuracy for svm model with linear kernel is about 0.77, which is a little bit smaller than logistic regression and svm model with rb kernel. Therefore, between two svm models, svm model with rb kernel is better.
+
+# Evaluation of fit of models with holdout method 
+# F score for first svm model
+Airbnb.test$satisfaction <- ifelse(Airbnb.test$satisfaction == "Satisfaction",1,0)
+svm.rb_predictions <- predict(svm.rb, Airbnb.test)
+svm.rb_predictions <- ifelse(svm.rb_predictions == "Satisfaction",1,0)
+preds.svm.rb <- sum(svm.rb_predictions)
+precision <- sum(svm.rb_predictions & Airbnb.test$satisfaction)/preds.svm.rb
+recall <- sum(svm.rb_predictions & Airbnb.test$satisfaction)/sum(Airbnb.test$satisfaction)
+f <- 2 * precision * recall/(precision + recall)
+F.pre.rec.svm.rb <- data.frame(precision, recall, f) 
+F.pre.rec.svm.rb
+
+## Actually I created ensemble model with rf method, but the result is the same with svm.rb model
+
+# F score for the second svm model
+svm_predictions <- predict(Airbnb_svm, Airbnb.test)
+svm_predictions <- ifelse(svm_predictions == "Satisfaction",1,0)
+preds.svm <- sum(svm_predictions)
+precision <- sum(svm_predictions & Airbnb.test$satisfaction)/preds.svm
+recall <- sum(svm_predictions & Airbnb.test$satisfaction)/sum(Airbnb.test$satisfaction)
+f <- 2 * precision * recall/(precision + recall)
+F.pre.rec.svm <- data.frame(precision, recall, f) 
+F.pre.rec.svm
+```
+
+## Comparison of models
+
+## Precision, recall, and f score
+
+Precision, recall, and f score are used to compare models.
+
+```{r}
+# Comparison of logistic regression model and SVM models with different kernel 
+satisfaction.models <- rbind(F.pre.rec.log, F.pre.rec.svm, F.pre.rec.svm.rb)
+rownames(satisfaction.models) <- c("Logistic","SVM.Linear", "SVM.rb")
+satisfaction.models
+# I consider value of precision to compare models, so SVM model with rb kernel has the highest precision. Thus, it can be the best model to predict satisfaction.
+```
+
+## Model1 - Host's policies - Naive Bayes model
+
+I use naive bayes model, because I want to predict hosts' policies types (point) based on house rules, which is a text feature.
+
+```{r}
+# Convert dummy variable to categorical to use in naive bayes model
+Airbnb$point <- ifelse(Airbnb$point == 0, "Flexible policies", "Strict policies")
+# Creat dataframe with point variable (strict/flexible) and house rules feature, which is rules that are written by host on Airbnb website
+host.df <- data.frame(house_rules = Airbnb$house_rules, point = Airbnb$point)
+str(host.df)
+host.df$point <- factor(host.df$point)
+table(host.df$point)
+# Cleaning and standardizing text data
+library(tm)
+house_rules_corpus <- VCorpus(VectorSource(host.df$house_rules))
+print(house_rules_corpus)
+# Look at two first notes details
+inspect(house_rules_corpus[1:2])
+# Look at first note statement
+as.character(house_rules_corpus[[1]])
+
+rules_corpus_clean <- tm_map(house_rules_corpus,
+    content_transformer(tolower))
+as.character(house_rules_corpus[[2]])
+as.character(rules_corpus_clean[[2]])
+# Cleaning text data (house_rules feature)
+rules_corpus_clean <- tm_map(rules_corpus_clean, removeNumbers)
+rules_corpus_clean <- tm_map(rules_corpus_clean,removeWords, stopwords())
+rules_corpus_clean <- tm_map(rules_corpus_clean, removePunctuation)
+rules_corpus_clean <- tm_map(rules_corpus_clean , stemDocument)
+# After removing numbers, stop words, and punctuation, and also performing stemming, the text messages are left with the blank spaces. Therefore, the final step in our text cleanup process is to remove additional whitespace using the stripWhitespace()
+rules_corpus_clean <- tm_map(rules_corpus_clean, stripWhitespace)
+# Making document matrix for cleaned corpus
+rules_dtm <- DocumentTermMatrix(rules_corpus_clean)
+rules_dtm
+# Split document of cleaned corpus to training and testing datasets
+# 75% data for training and 25% for testing datasets
+rules_dtm_train <- rules_dtm[1:2772, ]
+rules_dtm_test  <- rules_dtm[2773:3696, ]
+rules_train_labels <- host.df[1:2772, ]$point
+rules_test_labels  <- host.df[2773:3696, ]$point
+# Presenting text data
+library(wordcloud)
+# Strict policies
+strict <- subset(host.df, point == "Strict policies")
+wordcloud(strict$house_rules, max.words = 50, scale = c(3, 0.5))
+# Flexible policies
+flexible <- subset(host.df, point == "Flexible policies")
+wordcloud(flexible$house_rules, max.words = 50, scale = c(3, 0.5))
+```
+
+
+## Evaluation of fit of models with holdout method
+
+```{r}
+set.seed(123)
+# Finding frequesncy words
+rules_freq_words <- findFreqTerms(rules_dtm_train, 5)
+str(rules_freq_words)
+rules_dtm_freq_train <- rules_dtm_train[ ,rules_freq_words]
+rules_dtm_freq_test <- rules_dtm_test[ ,rules_freq_words]
+convert_counts <- function(x) {
+    x <- ifelse(x > 0, "Yes", "No")
+}
+rules_train <- apply(rules_dtm_freq_train, MARGIN = 2,
+    convert_counts)
+rules_test <- apply(rules_dtm_freq_test, MARGIN = 2,
+    convert_counts)
+# Create naive bayes model to predict host's policies type based on house_rules note
+library(e1071)
+rules_classifier <- naiveBayes(rules_train, rules_train_labels)
+# Evaluation of fit of models with holdout method
+rules_test_pred <- predict(rules_classifier, rules_test)
+rules_train_labels <- as.factor(rules_train_labels)
+rules_test_pred <- as.factor(rules_test_pred)
+# Create confusion matrix
+confusionMatrix(rules_test_labels, rules_test_pred)
+# accuracy of model is 0.83
+```
+
+```{r}
+# Evaluation with probability to calculate area under plot
+rules.pred.prob <- predict(rules_classifier, rules_test, type = "raw")
+rules.pred.prob <- data.frame(rules.pred.prob)
+rules.pred.prob <- rules.pred.prob$Strict.policies
+library(pROC)
+auc <- roc(rules_test_labels, rules.pred.prob)
+print(auc$auc)
+```
+
+## Model2 - Host's policies - RandomForest model
+
+The other appropriate model to predict point feature based on text, is RandomForest model.
+
+## Evaluation of fit of models with holdout method
+
+## Comparison of models
+
+## Based on ConfusionMatrix
+
+The comparison between two models is considered based on accuracy of models.
+
+```{r}
+# Creat training and testing datasets based on document matrix
+rules_dtm <- DocumentTermMatrix(rules_corpus_clean)
+sparse <- removeSparseTerms(rules_dtm, 0.995)
+rules_dtm <- as.data.frame(as.matrix(sparse))
+colnames(rules_dtm) <-  make.names(colnames(rules_dtm))
+rules_dtm$id <- host.df$point
+prop.table(table(rules_dtm$id))
+library(caTools)
+set.seed(123)
+split <- sample.split(rules_dtm$id, SplitRatio = 0.75)
+train.rules_dtm <- subset(rules_dtm, split==TRUE)
+test.rules_dtm <- subset(rules_dtm, split==FALSE)
+
+library(randomForest)
+set.seed(123)
+train.rules_dtm$id <- as.factor(train.rules_dtm$id)
+test.rules_dtm$id <- as.factor(test.rules_dtm$id)
+ 
+model.rf <- randomForest(id ~ ., data=train.rules_dtm)
+model.rf
+predict.rf <- predict(model.rf, test.rules_dtm)
+table(test.rules_dtm$id, predict.rf)
+acc <- ifelse(predict.rf == test.rules_dtm$id, 1, 0) 
+accuracy_values <- sum(acc)/nrow(test.rules_dtm)
+accuracy_values
+
+# Accuracy of random forest model is equal to 0.86, which is a little bit higher than naive bayes model's accuracy (0.83). Therefore, the random forest model is better model to predict host's policies based on house rules notes.
+```
+
+# 6) Deployment:
+
+Being super host, number of accommodates, bathroom, and bedrooms, availability of a listing in 365 days, and satisfaction have significant positive impact on price per night. It means that if the value for these variables are increased, price per night will increase as well. On the other hand, number of reviews has significant negative impact on price per night. If a specific Airbnb listing locates in Dorchester, Hyde Park, Mattapan, or Roslindale, its price per night will be dropped.
+PCA analysis in ensemble model predicts price per night with higher accuracy and lower RMSE value. Therefore, it is the best model to predict nighty price for Airbnb listings in Boston.
+
+Number of reviews, price, cleaning fee, and host response rate have positive significant effect on customer’s satisfaction. It means that if a particular Airbnb listing has greater number of reviews, higher cleaning fee, higher price, and high percentage for host response rate, customers will be more satisfied about their experiences. On the other hand, if number of accommodates and minimum nights are increased, the value of visitor’s satisfaction will be dropped.
+
+The SVM model with radial basis kernel has highest accuracy and highest precision. Therefore, it is the best model to predict satisfaction feature.
+
+In order to predict type of host’s policies based on their notes on Airbnb website, random forest classifier is the better model compare to naïve Bayes model. Because, its accuracy is higher than naïve Bayes’ accuracy, which is equal to 0.86.
+
+
+
+
